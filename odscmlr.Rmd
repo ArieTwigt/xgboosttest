@@ -1,0 +1,361 @@
+---
+title: "XGBOOST"
+author: "Arie Twigt"
+output: html_notebook
+---
+
+Elasticnet
+
+
+$$
+  Y = f(X)
+$$
+
+$$
+y = f(x) = a + bx
+$$
+
+For xboost you do need dummy variables.
+
+
+Trees. Figure out in bins. 
+
+Room, e.g. simple average.
+Deviding population in buckets --> how do people define the buckets?
+
+Decision tree --> bucket splits.
+
+
+$$
+  \hat{f} = \sum{m=1}^M \hat{c}_mI(x\in R_m)
+
+$$
+
+Decision in the decision tree is making the splits
+
+cat --> categorisation and decision tree
+
+
+
+Breaking data in M regions. For each region the function is becoming the average of a region. You are in a region or not.
+
+AI: 95% time is logistic regression or if/else statement
+
+```{r}
+library(coefplot)
+library(xgboost)
+library(magrittr)
+library(dygraphs)
+library(useful)
+```
+
+```{r}
+
+land_train <- readRDS('data/manhattan_Train.rds')
+land_test <- readRDS('data/manhattan_Test.rds')
+land_val <- readRDS('data/manhattan_Validate.rds')
+```
+
+
+XGboost written by computer engineers so therefore they want an integer.
+
+```{r}
+set.seed(1123)
+
+table(land_train$HistoricDistrict)
+histFormula <- HistoricDistrict ~ FireService + 
+  ZoneDist1 + ZoneDist2 + Class + LandUse + 
+  OwnerType + LotArea + BldgArea + ComArea + 
+  ResArea + OfficeArea + RetailArea + 
+  GarageArea + FactryArea + NumBldgs + 
+  NumFloors + UnitsRes + UnitsTotal + 
+  LotFront + LotDepth + BldgFront + 
+  BldgDepth + LotType + Landmark + BuiltFAR +
+  Built + TotalValue - 1 # subtracting intersept since a tree does not need an intercept
+
+landX_train <- build.x(histFormula, data=land_train, contrasts=FALSE, sparse=TRUE)
+
+landY_train <- build.y(histFormula, data=land_train) %>% 
+  as.integer() - 1
+
+landX_test <- build.x(histFormula, data=land_test, contrasts=FALSE, sparse=TRUE)
+
+landY_test <- build.y(histFormula, data=land_test) %>% 
+  as.integer() - 1
+
+landX_val <- build.x(histFormula, data=land_val, contrasts=FALSE, sparse=TRUE)
+
+landY_val <- build.y(histFormula, data=land_val) %>% 
+  as.integer() - 1
+
+landY_train
+
+# data has to be converted into integer therfore used the '%>%' pipe
+
+```
+
+Xgboost does validation but does not do it clean. Third dataset is used for ....
+
+
+
+Xboost want things like a certain way, as XGboost objects.
+It is like a list holding objects
+
+```{r}
+xgTrain <- xgb.DMatrix(data=landX_train, label=landY_train)
+xgVal <- xgb.DMatrix(data=landX_val, label=landY_val)
+```
+
+
+Fit the first model.
+
+Rpart --> recursive partitioning.
+
+```{r}
+xg1 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',   # what you want to accomplish, like a cost function
+  nrounds=1
+)
+```
+
+If it will be countinous: 'linear:regression' or something like that
+
+We have built the tree
+
+```{r}
+xgb.plot.multi.trees(xg1, feature_names=colnames(landX_train))
+```
+
+
+
+You let the computer the designs for you.
+
+The default maximum it can go is 60 in a tree. Default is six (this is a type of hyper parameter).
+
+Is this better than random forest? This is still one tree. It is understandabele, but also highly variabele. You want stable results. Tree is averaged and will do better at different parts of the room. 
+
+When you build the tree, you use all the data.
+With random forest you random your sample and random your columns. --> Bagging (Bootstrap Aggregated)
+--> Great, greatest of all time. Fast, blackboxed.
+
+Then, Boosting --> Most famous for trees --> but can be used for everything
+
+THey boosted whatever the wanted to boost.
+
+Boosting. Workst for anything.
+You fit a model, see how well you did. Use that to adjust your weights for next model. E.g. next model fitted on residuals(errors) of prior model... and so fort and keep stacking itself. Model --> Adjust weights --> model
+After that a normalization step (like in case of category probabilities)
+
+$$
+  \hat{y}_i^t = \sum_{k=1}^tf_k(x_i) = \hat{y}_i{(t-1)} + f_t(x_i)
+$$
+
+It does not matter what model it is, it is about which one predicts the best.
+
+```{r}
+xg2 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=1,
+  eval_metric='logloss', # how right where you, or how wrong where you
+  watchlist=list(train=xgTrain)
+)
+
+```
+
+$$
+  \text{logloss}=ylog(p) _ (1-y)log(1-p_i)
+$$
+
+
+
+
+Additive trees. In random forest, you independently train
+
+Boosting, trees on top of that
+
+
+Instead of one tree lets build 100 trees. The logloss will go down. Just by Boosting.
+
+
+```{r}
+xg3 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=100,
+  eval_metric='logloss', # how right where you, or how wrong where you
+  watchlist=list(train=xgTrain)
+)
+
+```
+
+
+```{r}
+xg4 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=300,
+  eval_metric='logloss', # how right where you, or how wrong where you
+  watchlist=list(train=xgTrain)
+)
+
+```
+
+
+You can keep boosting forever, but it might be overfitting?
+**This is on the training data** it alwways goes better on the traiing data.
+
+--> More dept (more leaves), greater chance to overfitting
+
+Validate data
+
+```{r}
+xg5 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=300,
+  eval_matric='logloss',
+  watchlist=list(train=xgTrain, validate=xgVal),
+  early_stopping_rounds = 70
+)
+
+```
+
+
+Dygraph
+
+```{r}
+
+dygraph(xg5$evaluation_log)
+```
+
+
+Tell xgboost to stop trying if it is improved for a while
+
+```{r}
+xg6 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=300,
+  eval_matric='logloss',
+  watchlist=list(train=xgTrain, validate=xgVal),
+  early_stopping_rounds = 70 # stop if it doesn't got any better after x rounds
+)
+
+```
+
+
+
+```{r}
+xg6$best_iteration
+```
+
+```{r}
+xg6$best_score
+```
+
+
+What is proper dept, too deep is overfitting and too shallow is not enoug coverage.
+
+```{r}
+
+xg7 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=300,
+  eval_matric='logloss',
+  watchlist=list(train=xgTrain, validate=xgVal),
+  max_depth=8
+)
+```
+
+Stop if it does not improve after *n* rounds
+
+```{r}
+
+xg8 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=300,
+  eval_matric='logloss',
+  watchlist=list(train=xgTrain, validate=xgVal),
+  early_stopping_rounds = 70,
+  max_depth=3
+)
+```
+
+
+```{r}
+xg7$best_score
+xg8$best_score
+```
+
+
+Can do grid search. Random search more popular than grid search
+
+
+
+Pseudo random forest, not true random forest.
+
+```{r}
+
+xg9 <- xgb.train(
+  data=xgTrain,
+  objective='binary:logistic',
+  nrounds=10,
+  eval_matric='logloss',
+  watchlist=list(train=xgTrain, validate=xgVal),
+  early_stopping_rounds = 70,
+  max_depth=3,
+  subsample=0.5, colsample_bytree=0.5, # for each three only choose half of the columns
+  num_parallel_tree=50 # 50 trees at a time boosting 10 times
+)
+
+```
+
+Option, ncore, using multiple cores at a time. Can do xgboost in parallel --> How ?
+Search of splits can be done in parallel. Can do multiple searches in parallel. In GPU can do massive speedups.
+
+
+XGboost is amazing algorithm.
+
+In no audio, picture etc. XGboost is better. For vector data XGboost is amazingly fast.
+
+G stands for gradient. Extreme Gradient Boosting.
+
+XGboost takes average for regressing tree.
+
+Create variabele importance plot
+
+```{r}
+xgb.plot.importance(
+  xgb.importance(xg7, feature_names = colnames(landX_train))
+)
+```
+
+# Predictions
+
+Probability predictions
+
+```{r}
+pred <- predict(xg9, xgTrain)
+```
+
+Binary predictions
+
+```{r}
+prediction <- as.numeric(pred > 0.5)
+```
+
+Measure performance
+
+```{r}
+err <- mean(as.numeric(pred > 0.5) != landY_test)
+print(paste("test-error=", err))
+```
+
+# References
+
+https://cran.r-project.org/web/packages/xgboost/vignettes/xgboostPresentation.html
+https://data.world/landeranalytics/training
