@@ -1,5 +1,9 @@
 # XGBoost demo 
 
+Good old demonstration about how Xtreme Gradient Boosting works.
+
+`git clone
+
 
 # References
 
